@@ -2,17 +2,17 @@
 
 #### How the boot works?
 
-When an x86-based computer is turned on, it begins a complex path to get to the stage where control is transferred to our kernel's "main" routine ("kmain()"). For this course, we are going to consider only a BIOS boot method and not the new UEFI one.
+When an x86-based computer is turned on, it begins a complex path to get to the stage where control is transferred to our kernel's "main" routine (`kmain()`). For this course, we are only going to consider the BIOS boot method and not it's successor (UEFI).
 
 The BIOS boot sequence is: RAM detection -> Hardware detection/Initialization -> Boot sequence.
 
 The most important step for us is the "Boot sequence", where the BIOS is done with its initialization and tries to transfer control to the next stage of the bootloader process.
 
-During the "Boot sequence", the BIOS will first choose the "boot device" (floppy disk, hard-disk, CD, usb flash memory device or network). Our Operating System will first boot from the hard-disk (but it will be possible to boot it from a CD or a usb flash memory device).
+During the "Boot sequence", the BIOS will try to determine a "boot device" (e.g. floppy disk, hard-disk, CD, USB flash memory device or network). Our Operating System will initially boot from the hard-disk (but it will be possible to boot it from a CD or a USB flash memory device in future). A device is considered bootable if the bootsector contains the valid signature bytes `0x55` and `0xAA` at offsets 511 and 512 respectively (called the magic bytes of the Master Boot Record, also known as the MBR). This signature is represented (in binary) as 0b1010101001010101. The alternating bit pattern was thought to be a protection against certain failures (drive or controller). If this pattern is garbled or 0x00, the device is not considered bootable.
 
-The BIOS will read 512 bytes from the first valid bootsector (where the last two bytes are 0x55 0xAA), or lock up with an error message if it cannot find one. And it'll transfer these 512 bytes into physical memory starting at address 0x7c00 then starts running the code that now begins at 0x7c00.
+BIOS physically searches for a boot device by loading the first 512 bytes from the bootsector of each device into physical memory, starting at the address `0x7C00` (1 KiB below the 32 KiB mark). When the valid signature bytes are detected, BIOS transfers control to the `0x7C00` memory address (via a jump instruction) in order to execute the bootsector code.
 
-When the BIOS transfers control to the bootsector, the bootsector code is loaded and running at physical address 0x7c00 and the CPU is in 16-bit Real Mode but our kernel will be only 32bits so we need a bootloader to read our kernel switch to protected mode and starts running it.
+Throughout this process the CPU has been running in 16-bit Real Mode, which is the default state for x86 CPUs in order to maintain backwards compatibility. To execute the 32-bit instructions within our kernel, a bootloader is required to switch the CPU into Protected Mode.
 
 #### What is GRUB?
 
@@ -37,7 +37,7 @@ This boot process also initializes some of our C++ runtime, it will be described
 
 Multiboot header structure:
 
-```
+```cpp
 struct multiboot_info {
 	u32 flags;
 	u32 low_mem;
@@ -72,7 +72,7 @@ You can use the command ```mbchk kernel.elf``` to validate your kernel.elf file 
 
 #### Create a disk image for our kernel and grub
 
-The script [diskimage.sh](https://github.com/SamyPesse/How-to-Make-a-Computer-Operating-System/blob/master/src/sdk/diskimage.sh) will generate a hard disk image than can be used by QEMU.
+The script [diskimage.sh](https://github.com/SamyPesse/How-to-Make-a-Computer-Operating-System/blob/master/src/sdk/diskimage.sh) will generate a hard disk image that can be used by QEMU.
 
 The first step is to create a hard-disk image (c.img) using qemu-img:
 
@@ -82,7 +82,7 @@ qemu-img create c.img 2M
 
 We need now to partition the disk using fdisk:
 
-```
+```bash
 fdisk ./c.img
 
 # Switch to Expert commands
@@ -112,10 +112,10 @@ fdisk ./c.img
 # Choose partition number
 > 1
 
-# Choose first cylinder (1-4, default 1)
+# Choose first sector (1-4, default 1)
 > 1
 
-# Choose last cylinder, +cylinders or +size{K,M,G} (1-4, default 4)
+# Choose last sector, +cylinders or +size{K,M,G} (1-4, default 4)
 > 4
 
 # Toggle bootable flag
@@ -128,23 +128,23 @@ fdisk ./c.img
 > w
 ```
 
-We need now to attach the created partition to the loop-device (which allows a file to be access like a block device) using losetup. The offset of the partition is passed as an argument and calculated using: **offset= start_sector * bytes_by_sector**.
+We need now to attach the created partition to the loop-device using losetup. This allows a file to be access like a block device. The offset of the partition is passed as an argument and calculated using: **offset= start_sector * bytes_by_sector**.
 
-Using ```fdisk -l -u c.img```, you get: 63 * 512 = 32356.
+Using ```fdisk -l -u c.img```, you get: 63 * 512 = 32256.
 
-```
+```bash
 losetup -o 32256 /dev/loop1 ./c.img
 ```
 
 We create a EXT2 filesystem on this new device using:
 
-```
+```bash
 mke2fs /dev/loop1
 ```
 
 We copy our files on a mounted disk:
 
-```
+```bash
 mount  /dev/loop1 /mnt/
 cp -R bootdisk/* /mnt/
 umount /mnt/
@@ -152,7 +152,7 @@ umount /mnt/
 
 Install GRUB on the disk:
 
-```
+```bash
 grub --device-map=/dev/null << EOF
 device (hd0) ./c.img
 geometry (hd0) 4 16 63
@@ -164,7 +164,7 @@ EOF
 
 And finally we detach the loop device:
 
-```
+```bash
 losetup -d /dev/loop1
 ```
 
